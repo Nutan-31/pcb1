@@ -188,6 +188,27 @@ def generate_netlist(request: PromptRequest):
     except Exception as e:
         return {"result": f"Error: {str(e)}", "ai_response": ""} 
     
+@app.post("/onnx_placement")
+def onnx_placement(request: PromptRequest):
+    try:
+        import sys
+        plugin_dir = "C:\\Users\\B T NUTAN REDDY\\Documents\\KiCad\\9.0\\scripting\\plugins\\ai_kicad_plugin"
+        if plugin_dir not in sys.path:
+            sys.path.insert(0, plugin_dir)
+        
+        from onnx_placement import train_and_export_onnx
+        
+        # Train and export ONNX model
+        success = train_and_export_onnx(num_components=10, timesteps=500)
+        
+        if success:
+            return {"result": "✅ ONNX model trained and exported successfully!\nNext placement will be instant!"}
+        else:
+            return {"result": "⚠️ ONNX export failed but model saved in regular format!"}
+            
+    except Exception as e:
+        return {"result": f"Error: {str(e)}"}
+
 @app.get("/health")
 def health():
     return {"status": "running"}

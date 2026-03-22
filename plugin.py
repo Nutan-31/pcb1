@@ -24,7 +24,7 @@ class AiKicadPlugin(pcbnew.ActionPlugin):
 
 class AiPluginDialog(wx.Dialog):
     def __init__(self, parent):
-        super().__init__(parent, title="AI KiCad Plugin", size=(450, 600))
+        super().__init__(parent, title="AI KiCad Plugin", size=(450, 650))
         self.SetBackgroundColour(wx.Colour(30, 30, 30))
 
         panel = wx.Panel(self)
@@ -56,25 +56,23 @@ class AiPluginDialog(wx.Dialog):
         btn_placement = wx.Button(panel, label="🧠  AI Component Placement (RL)", size=(-1, 45))
         btn_mfg = wx.Button(panel, label="🔧  Manufacturing Checks", size=(-1, 45))
         btn_drc = wx.Button(panel, label="✅  Run DRC Check", size=(-1, 45))
+        btn_gerber = wx.Button(panel, label="📦  Export Gerber Files", size=(-1, 45))
 
         # Button colors
         btn_schematic.SetBackgroundColour(wx.Colour(0, 120, 200))
         btn_schematic.SetForegroundColour(wx.WHITE)
-
         btn_write.SetBackgroundColour(wx.Colour(0, 180, 180))
         btn_write.SetForegroundColour(wx.WHITE)
-
         btn_netlist.SetBackgroundColour(wx.Colour(50, 50, 200))
         btn_netlist.SetForegroundColour(wx.WHITE)
-
         btn_placement.SetBackgroundColour(wx.Colour(0, 160, 80))
         btn_placement.SetForegroundColour(wx.WHITE)
-
         btn_mfg.SetBackgroundColour(wx.Colour(200, 120, 0))
         btn_mfg.SetForegroundColour(wx.WHITE)
-
         btn_drc.SetBackgroundColour(wx.Colour(160, 0, 160))
         btn_drc.SetForegroundColour(wx.WHITE)
+        btn_gerber.SetBackgroundColour(wx.Colour(180, 50, 50))
+        btn_gerber.SetForegroundColour(wx.WHITE)
 
         # Button fonts
         btn_font = wx.Font(10, wx.FONTFAMILY_DEFAULT,
@@ -85,6 +83,7 @@ class AiPluginDialog(wx.Dialog):
         btn_placement.SetFont(btn_font)
         btn_mfg.SetFont(btn_font)
         btn_drc.SetFont(btn_font)
+        btn_gerber.SetFont(btn_font)
 
         vbox.Add(btn_schematic, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
         vbox.Add(btn_write, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
@@ -92,6 +91,7 @@ class AiPluginDialog(wx.Dialog):
         vbox.Add(btn_placement, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
         vbox.Add(btn_mfg, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
         vbox.Add(btn_drc, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
+        vbox.Add(btn_gerber, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
 
         # Status bar
         self.status = wx.StaticText(panel, label="✅ Ready — FastAPI + Ollama Running")
@@ -113,6 +113,7 @@ class AiPluginDialog(wx.Dialog):
         btn_placement.Bind(wx.EVT_BUTTON, self.on_placement)
         btn_mfg.Bind(wx.EVT_BUTTON, self.on_mfg)
         btn_drc.Bind(wx.EVT_BUTTON, self.on_drc)
+        btn_gerber.Bind(wx.EVT_BUTTON, self.on_gerber)
 
         panel.SetSizer(vbox)
 
@@ -164,6 +165,9 @@ class AiPluginDialog(wx.Dialog):
                 )
                 data = response.json()
                 ai_response = data.get("ai_response", "")
+                import importlib
+                import schematic_writer
+                importlib.reload(schematic_writer)
                 from schematic_writer import write_components_from_prompt
                 result = write_components_from_prompt(ai_response)
                 self.update_status("✅ Components added to PCB!", (0, 200, 100))
@@ -206,27 +210,54 @@ class AiPluginDialog(wx.Dialog):
         input_dialog.Destroy()
 
     def on_placement(self, event):
-        confirm = wx.MessageBox(
-            "This will use RL to place all components on your PCB board!\n\nContinue?",
-            "AI RL Placement",
-            wx.YES_NO | wx.ICON_QUESTION
+        choices = ["🧠 RL Placement (Train each time)", "⚡ ONNX Placement (Fast - Pre-trained)"]
+        dialog = wx.SingleChoiceDialog(
+            self,
+            "Choose placement method:",
+            "AI Component Placement",
+            choices
         )
-        if confirm == wx.YES:
-            self.update_status("⏳ Running RL placement...", (255, 200, 0))
-            try:
-                response = requests.post(
-                    "http://127.0.0.1:8000/rl_placement",
-                    json={"prompt": "place components"},
-                    timeout=120
+        if dialog.ShowModal() == wx.ID_OK:
+            choice = dialog.GetSelection()
+
+            if choice == 0:
+                confirm = wx.MessageBox(
+                    "This will use RL to place all components!\n\nContinue?",
+                    "RL Placement",
+                    wx.YES_NO | wx.ICON_QUESTION
                 )
-                result = response.json()["result"]
-                self.update_status("✅ Placement complete!", (0, 200, 100))
-                wx.MessageBox(result, "RL Placement Result", wx.OK)
-                pcbnew.Refresh()
-            except Exception as e:
-                self.update_status("❌ Error!", (255, 50, 50))
-                wx.MessageBox(f"Error: {str(e)}\nMake sure FastAPI backend is running!",
-                            "Error", wx.OK | wx.ICON_ERROR)
+                if confirm == wx.YES:
+                    self.update_status("⏳ Running RL placement...", (255, 200, 0))
+                    try:
+                        response = requests.post(
+                            "http://127.0.0.1:8000/rl_placement",
+                            json={"prompt": "place components"},
+                            timeout=120
+                        )
+                        result = response.json()["result"]
+                        self.update_status("✅ Placement complete!", (0, 200, 100))
+                        wx.MessageBox(result, "RL Placement Result", wx.OK)
+                        pcbnew.Refresh()
+                    except Exception as e:
+                        self.update_status("❌ Error!", (255, 50, 50))
+                        wx.MessageBox(f"Error: {str(e)}",
+                                    "Error", wx.OK | wx.ICON_ERROR)
+
+            elif choice == 1:
+                self.update_status("⏳ Running ONNX placement...", (255, 200, 0))
+                try:
+                    import importlib
+                    import onnx_placement
+                    importlib.reload(onnx_placement)
+                    from onnx_placement import place_components_with_onnx
+                    result = place_components_with_onnx()
+                    self.update_status("✅ ONNX Placement complete!", (0, 200, 100))
+                    wx.MessageBox(result, "ONNX Placement Result", wx.OK)
+                except Exception as e:
+                    self.update_status("❌ Error!", (255, 50, 50))
+                    wx.MessageBox(f"Error: {str(e)}",
+                                "Error", wx.OK | wx.ICON_ERROR)
+        dialog.Destroy()
 
     def on_mfg(self, event):
         input_dialog = wx.TextEntryDialog(
@@ -277,6 +308,27 @@ class AiPluginDialog(wx.Dialog):
                 wx.MessageBox(f"Error: {str(e)}\nMake sure FastAPI backend is running!",
                             "Error", wx.OK | wx.ICON_ERROR)
         input_dialog.Destroy()
+
+    def on_gerber(self, event):
+        confirm = wx.MessageBox(
+            "This will export all Gerber files for manufacturing!\n\nFiles will be saved to your project's gerbers folder.\n\nContinue?",
+            "Export Gerber Files",
+            wx.YES_NO | wx.ICON_QUESTION
+        )
+        if confirm == wx.YES:
+            self.update_status("⏳ Exporting Gerber files...", (255, 200, 0))
+            try:
+                import importlib
+                import gerber_export
+                importlib.reload(gerber_export)
+                from gerber_export import export_gerbers
+                result = export_gerbers()
+                self.update_status("✅ Gerber files exported!", (0, 200, 100))
+                wx.MessageBox(result, "Gerber Export Complete", wx.OK)
+            except Exception as e:
+                self.update_status("❌ Error!", (255, 50, 50))
+                wx.MessageBox(f"Error: {str(e)}",
+                            "Error", wx.OK | wx.ICON_ERROR)
 
 
 AiKicadPlugin().register()
