@@ -24,32 +24,29 @@ class AiKicadPlugin(pcbnew.ActionPlugin):
 
 class AiPluginDialog(wx.Dialog):
     def __init__(self, parent):
-        super().__init__(parent, title="AI KiCad Plugin", size=(450, 650))
+        super().__init__(parent, title="AI KiCad Plugin", size=(450, 750))
         self.SetBackgroundColour(wx.Colour(30, 30, 30))
 
         panel = wx.Panel(self)
         panel.SetBackgroundColour(wx.Colour(30, 30, 30))
         vbox = wx.BoxSizer(wx.VERTICAL)
 
-        # Title
         title = wx.StaticText(panel, label="🤖 AI-Powered KiCad Plugin")
         title.SetForegroundColour(wx.Colour(0, 200, 255))
         title.SetFont(wx.Font(14, wx.FONTFAMILY_DEFAULT,
                     wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD))
         vbox.Add(title, flag=wx.ALIGN_CENTER | wx.TOP, border=20)
 
-        # Subtitle
         subtitle = wx.StaticText(panel, label="Local AI • No Cloud • 100% Private")
         subtitle.SetForegroundColour(wx.Colour(150, 150, 150))
         subtitle.SetFont(wx.Font(9, wx.FONTFAMILY_DEFAULT,
                     wx.FONTSTYLE_ITALIC, wx.FONTWEIGHT_NORMAL))
         vbox.Add(subtitle, flag=wx.ALIGN_CENTER | wx.TOP, border=5)
 
-        # Divider
         line = wx.StaticLine(panel)
         vbox.Add(line, flag=wx.EXPAND | wx.ALL, border=15)
 
-        # Buttons
+        # Create all buttons
         btn_schematic = wx.Button(panel, label="📐  Auto Generate Schematic", size=(-1, 45))
         btn_write = wx.Button(panel, label="✏️  Write Components to PCB", size=(-1, 45))
         btn_netlist = wx.Button(panel, label="🔗  Generate Netlist", size=(-1, 45))
@@ -57,34 +54,51 @@ class AiPluginDialog(wx.Dialog):
         btn_mfg = wx.Button(panel, label="🔧  Manufacturing Checks", size=(-1, 45))
         btn_drc = wx.Button(panel, label="✅  Run DRC Check", size=(-1, 45))
         btn_gerber = wx.Button(panel, label="📦  Export Gerber Files", size=(-1, 45))
+        btn_schema_export = wx.Button(panel, label="📄  Export .kicad_sch", size=(-1, 45))
+        btn_freerouting = wx.Button(panel, label="🔀  Auto Route (FreeRouting)", size=(-1, 45))
 
-        # Button colors
-        btn_schematic.SetBackgroundColour(wx.Colour(0, 120, 200))
-        btn_schematic.SetForegroundColour(wx.WHITE)
-        btn_write.SetBackgroundColour(wx.Colour(0, 180, 180))
-        btn_write.SetForegroundColour(wx.WHITE)
-        btn_netlist.SetBackgroundColour(wx.Colour(50, 50, 200))
-        btn_netlist.SetForegroundColour(wx.WHITE)
-        btn_placement.SetBackgroundColour(wx.Colour(0, 160, 80))
-        btn_placement.SetForegroundColour(wx.WHITE)
-        btn_mfg.SetBackgroundColour(wx.Colour(200, 120, 0))
-        btn_mfg.SetForegroundColour(wx.WHITE)
-        btn_drc.SetBackgroundColour(wx.Colour(160, 0, 160))
-        btn_drc.SetForegroundColour(wx.WHITE)
-        btn_gerber.SetBackgroundColour(wx.Colour(180, 50, 50))
-        btn_gerber.SetForegroundColour(wx.WHITE)
-
-        # Button fonts
+        # Button font
         btn_font = wx.Font(10, wx.FONTFAMILY_DEFAULT,
                     wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
+
+        # Button colors and fonts
+        btn_schematic.SetBackgroundColour(wx.Colour(0, 120, 200))
+        btn_schematic.SetForegroundColour(wx.WHITE)
         btn_schematic.SetFont(btn_font)
+
+        btn_write.SetBackgroundColour(wx.Colour(0, 180, 180))
+        btn_write.SetForegroundColour(wx.WHITE)
         btn_write.SetFont(btn_font)
+
+        btn_netlist.SetBackgroundColour(wx.Colour(50, 50, 200))
+        btn_netlist.SetForegroundColour(wx.WHITE)
         btn_netlist.SetFont(btn_font)
+
+        btn_placement.SetBackgroundColour(wx.Colour(0, 160, 80))
+        btn_placement.SetForegroundColour(wx.WHITE)
         btn_placement.SetFont(btn_font)
+
+        btn_mfg.SetBackgroundColour(wx.Colour(200, 120, 0))
+        btn_mfg.SetForegroundColour(wx.WHITE)
         btn_mfg.SetFont(btn_font)
+
+        btn_drc.SetBackgroundColour(wx.Colour(160, 0, 160))
+        btn_drc.SetForegroundColour(wx.WHITE)
         btn_drc.SetFont(btn_font)
+
+        btn_gerber.SetBackgroundColour(wx.Colour(180, 50, 50))
+        btn_gerber.SetForegroundColour(wx.WHITE)
         btn_gerber.SetFont(btn_font)
 
+        btn_schema_export.SetBackgroundColour(wx.Colour(50, 150, 50))
+        btn_schema_export.SetForegroundColour(wx.WHITE)
+        btn_schema_export.SetFont(btn_font)
+
+        btn_freerouting.SetBackgroundColour(wx.Colour(150, 50, 150))
+        btn_freerouting.SetForegroundColour(wx.WHITE)
+        btn_freerouting.SetFont(btn_font)
+
+        # Add buttons to layout
         vbox.Add(btn_schematic, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
         vbox.Add(btn_write, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
         vbox.Add(btn_netlist, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
@@ -92,6 +106,8 @@ class AiPluginDialog(wx.Dialog):
         vbox.Add(btn_mfg, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
         vbox.Add(btn_drc, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
         vbox.Add(btn_gerber, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
+        vbox.Add(btn_schema_export, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
+        vbox.Add(btn_freerouting, flag=wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, border=15)
 
         # Status bar
         self.status = wx.StaticText(panel, label="✅ Ready — FastAPI + Ollama Running")
@@ -107,6 +123,7 @@ class AiPluginDialog(wx.Dialog):
                     wx.FONTSTYLE_ITALIC, wx.FONTWEIGHT_NORMAL))
         vbox.Add(footer, flag=wx.ALIGN_CENTER | wx.TOP | wx.BOTTOM, border=10)
 
+        # Bind buttons
         btn_schematic.Bind(wx.EVT_BUTTON, self.on_schematic)
         btn_write.Bind(wx.EVT_BUTTON, self.on_write)
         btn_netlist.Bind(wx.EVT_BUTTON, self.on_netlist)
@@ -114,6 +131,8 @@ class AiPluginDialog(wx.Dialog):
         btn_mfg.Bind(wx.EVT_BUTTON, self.on_mfg)
         btn_drc.Bind(wx.EVT_BUTTON, self.on_drc)
         btn_gerber.Bind(wx.EVT_BUTTON, self.on_gerber)
+        btn_schema_export.Bind(wx.EVT_BUTTON, self.on_export_schematic)
+        btn_freerouting.Bind(wx.EVT_BUTTON, self.on_freerouting)
 
         panel.SetSizer(vbox)
 
@@ -159,17 +178,18 @@ class AiPluginDialog(wx.Dialog):
             self.update_status("⏳ Writing components to PCB...", (255, 200, 0))
             try:
                 response = requests.post(
-                    "http://127.0.0.1:8000/write_schematic",
+                    "http://127.0.0.1:8000/generate_schematic",
                     json={"prompt": prompt},
                     timeout=60
                 )
                 data = response.json()
                 ai_response = data.get("ai_response", "")
+                circuit_data = data.get("circuit_data", None)
                 import importlib
                 import schematic_writer
                 importlib.reload(schematic_writer)
                 from schematic_writer import write_components_from_prompt
-                result = write_components_from_prompt(ai_response)
+                result = write_components_from_prompt(ai_response, circuit_data)
                 self.update_status("✅ Components added to PCB!", (0, 200, 100))
                 wx.MessageBox(result, "Components Written to PCB", wx.OK)
             except Exception as e:
@@ -219,7 +239,6 @@ class AiPluginDialog(wx.Dialog):
         )
         if dialog.ShowModal() == wx.ID_OK:
             choice = dialog.GetSelection()
-
             if choice == 0:
                 confirm = wx.MessageBox(
                     "This will use RL to place all components!\n\nContinue?",
@@ -242,7 +261,6 @@ class AiPluginDialog(wx.Dialog):
                         self.update_status("❌ Error!", (255, 50, 50))
                         wx.MessageBox(f"Error: {str(e)}",
                                     "Error", wx.OK | wx.ICON_ERROR)
-
             elif choice == 1:
                 self.update_status("⏳ Running ONNX placement...", (255, 200, 0))
                 try:
@@ -329,6 +347,60 @@ class AiPluginDialog(wx.Dialog):
                 self.update_status("❌ Error!", (255, 50, 50))
                 wx.MessageBox(f"Error: {str(e)}",
                             "Error", wx.OK | wx.ICON_ERROR)
+
+    def on_export_schematic(self, event):
+        input_dialog = wx.TextEntryDialog(
+            self,
+            "Describe your circuit to export as .kicad_sch:",
+            "Export KiCad Schematic",
+            "555 timer LED blinker"
+        )
+        if input_dialog.ShowModal() == wx.ID_OK:
+            prompt = input_dialog.GetValue()
+            self.update_status("⏳ Generating and exporting schematic...", (255, 200, 0))
+            try:
+                response = requests.post(
+                    "http://127.0.0.1:8000/export_schematic",
+                    json={"prompt": prompt},
+                    timeout=60
+                )
+                data = response.json()
+                circuit_data = data.get("circuit_data", None)
+                if circuit_data:
+                    import importlib
+                    import schematic_exporter
+                    importlib.reload(schematic_exporter)
+                    from schematic_exporter import export_schematic_from_prompt
+                    result = export_schematic_from_prompt(circuit_data)
+                    self.update_status("✅ Schematic exported!", (0, 200, 100))
+                    wx.MessageBox(result, "Schematic Exported", wx.OK)
+                else:
+                    self.update_status("❌ Error!", (255, 50, 50))
+                    wx.MessageBox("Could not generate circuit data!", "Error", wx.OK | wx.ICON_ERROR)
+            except Exception as e:
+                self.update_status("❌ Error!", (255, 50, 50))
+                wx.MessageBox(f"Error: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
+        input_dialog.Destroy()
+
+    def on_freerouting(self, event):
+        confirm = wx.MessageBox(
+            "This will auto-route all traces on your PCB using FreeRouting!\n\nMake sure components are placed first.\n\nContinue?",
+            "Auto Route Board",
+            wx.YES_NO | wx.ICON_QUESTION
+        )
+        if confirm == wx.YES:
+            self.update_status("⏳ Auto-routing board...", (255, 200, 0))
+            try:
+                import importlib
+                import freerouting_integration
+                importlib.reload(freerouting_integration)
+                from freerouting_integration import auto_route_board
+                result = auto_route_board()
+                self.update_status("✅ Auto-routing complete!", (0, 200, 100))
+                wx.MessageBox(result, "Auto Route Result", wx.OK)
+            except Exception as e:
+                self.update_status("❌ Error!", (255, 50, 50))
+                wx.MessageBox(f"Error: {str(e)}", "Error", wx.OK | wx.ICON_ERROR)
 
 
 AiKicadPlugin().register()
