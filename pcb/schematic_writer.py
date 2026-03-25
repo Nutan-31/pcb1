@@ -1,6 +1,7 @@
 import pcbnew
 import os
 import json
+import re
 
 KICAD_FOOTPRINTS_PATH = "C:\\Program Files\\KiCad\\9.0\\share\\kicad\\footprints"
 
@@ -91,6 +92,185 @@ def load_footprint(lib_name: str, fp_name: str):
     return None
 
 
+def _split_ref_pin(value: str):
+    if not value:
+        return None, None
+    text = str(value).strip()
+    match = re.match(r'^([A-Za-z]+\d+)[\s:\-_/]*([A-Za-z0-9+\-]+)?$', text)
+    if not match:
+        return None, None
+    return match.group(1).upper(), (match.group(2) or "").upper()
+
+
+def _normalize_connections(raw_connections):
+    normalized = []
+    for item in raw_connections or []:
+        conn = None
+
+        if isinstance(item, dict):
+            from_ref = (item.get("from_ref") or "").upper()
+            to_ref = (item.get("to_ref") or "").upper()
+            from_pin = (item.get("from_pin") or "").upper()
+            to_pin = (item.get("to_pin") or "").upper()
+
+            if not (from_ref and to_ref):
+                from_value = item.get("from")
+                to_value = item.get("to")
+                if isinstance(from_value, str) and isinstance(to_value, str):
+                    from_ref, from_pin = _split_ref_pin(from_value)
+                    to_ref, to_pin = _split_ref_pin(to_value)
+
+            if from_ref and to_ref:
+                conn = {
+                    "from_ref": from_ref,
+                    "from_pin": from_pin,
+                    "to_ref": to_ref,
+                    "to_pin": to_pin,
+                    "net_name": item.get("net_name") or ""
+                }
+
+        elif isinstance(item, str):
+            pattern = (
+                r'([A-Za-z]+\d+)\s*(?:pin|pad)?\s*([A-Za-z0-9+\-]*)\s*'
+                r'(?:to|->|connect(?:ed)?\s*to)\s*'
+                r'([A-Za-z]+\d+)\s*(?:pin|pad)?\s*([A-Za-z0-9+\-]*)'
+            )
+            match = re.search(pattern, item, re.IGNORECASE)
+            if match:
+                conn = {
+                    "from_ref": match.group(1).upper(),
+                    "from_pin": (match.group(2) or "").upper(),
+                    "to_ref": match.group(3).upper(),
+                    "to_pin": (match.group(4) or "").upper(),
+                    "net_name": ""
+                }
+
+        if conn:
+            normalized.append(conn)
+
+    for idx, conn in enumerate(normalized, start=1):
+        if not conn.get("net_name"):
+            conn["net_name"] = f"NET_{idx}"
+
+    return normalized
+
+
+def _get_pad_by_pin(footprint, pin: str):
+    pads = list(footprint.Pads())
+    if not pads:
+        return None
+
+    pin_text = (pin or "").strip().upper()
+    if not pin_text:
+        return pads[0]
+
+    aliases = {
+        "A": "1",
+        "ANODE": "1",
+        "+": "1",
+        "VCC": "1",
+        "K": "2",
+        "CATHODE": "2",
+        "-": "2",
+        "GND": "2",
+    }
+    pin_text = aliases.get(pin_text, pin_text)
+    if pin_text.startswith("PIN"):
+        pin_text = pin_text[3:]
+
+    for pad in pads:
+        if str(pad.GetNumber()).upper() == pin_text:
+            return pad
+
+    return pads[0]
+
+
+def _make_unique_net(board, base_name: str):
+    net_name = (base_name or "NET").strip().replace(" ", "_")
+    net_name = re.sub(r'[^A-Za-z0-9_\-]', '_', net_name)
+    if not net_name:
+        net_name = "NET"
+
+    index = 0
+    while index < 100:
+        candidate = net_name if index == 0 else f"{net_name}_{index}"
+        try:
+            net_item = pcbnew.NETINFO_ITEM(board, candidate)
+            board.Add(net_item)
+            return net_item
+        except Exception:
+            index += 1
+    return None
+
+
+def _set_pad_net(pad, net):
+    """Set pad net in a KiCad-version-tolerant way."""
+    if not pad or not net:
+        return
+
+    try:
+        if hasattr(pad, "SetNet"):
+            pad.SetNet(net)
+            return
+    except Exception:
+        pass
+
+    try:
+        if hasattr(pad, "SetNetCode") and hasattr(net, "GetNetCode"):
+            pad.SetNetCode(net.GetNetCode())
+    except Exception:
+        pass
+
+
+def _connect_components(board, footprint_by_ref: dict, connections: list):
+    created = 0
+    skipped = 0
+
+    for conn in connections:
+        from_fp = footprint_by_ref.get(conn.get("from_ref", "").upper())
+        to_fp = footprint_by_ref.get(conn.get("to_ref", "").upper())
+        if not from_fp or not to_fp:
+            skipped += 1
+            continue
+
+        from_pad = _get_pad_by_pin(from_fp, conn.get("from_pin", ""))
+        to_pad = _get_pad_by_pin(to_fp, conn.get("to_pin", ""))
+        if not from_pad or not to_pad:
+            skipped += 1
+            continue
+
+        start_pos = from_pad.GetPosition() if from_pad else from_fp.GetPosition()
+        end_pos = to_pad.GetPosition() if to_pad else to_fp.GetPosition()
+
+        if start_pos == end_pos:
+            skipped += 1
+            continue
+
+        try:
+            net = _make_unique_net(board, conn.get("net_name", "NET"))
+            if net:
+                _set_pad_net(from_pad, net)
+                _set_pad_net(to_pad, net)
+
+            track = pcbnew.PCB_TRACK(board)
+            track.SetLayer(pcbnew.F_Cu)
+            track.SetWidth(pcbnew.FromMM(0.30))
+            track.SetStart(start_pos)
+            track.SetEnd(end_pos)
+            if net:
+                try:
+                    track.SetNet(net)
+                except Exception:
+                    pass
+            board.Add(track)
+
+            created += 1
+        except Exception:
+            skipped += 1
+
+    return created, skipped
+
+
 def add_components_from_circuit_data(circuit_data: dict):
     """
     Add components from circuit JSON data to PCB
@@ -109,6 +289,7 @@ def add_components_from_circuit_data(circuit_data: dict):
         
         added = []
         skipped = []
+        footprint_by_ref = {}
         
         for i, comp in enumerate(components):
             ref = comp.get("ref", f"U{i+1}")
@@ -130,11 +311,33 @@ def add_components_from_circuit_data(circuit_data: dict):
                 footprint.SetY(pcbnew.FromMM(y_pos))
                 board.Add(footprint)
                 added.append(ref)
+                footprint_by_ref[ref.upper()] = footprint
                 
             except Exception as e:
                 skipped.append(f"{ref}({str(e)[:20]})")
                 continue
         
+        # Apply connectivity after placement so the board has routable nets/tracks.
+        raw_connections = circuit_data.get("connections", [])
+        connections = _normalize_connections(raw_connections)
+
+        if not connections and len(added) >= 2:
+            for i in range(len(added) - 1):
+                connections.append({
+                    "from_ref": added[i].upper(),
+                    "from_pin": "2",
+                    "to_ref": added[i + 1].upper(),
+                    "to_pin": "1",
+                    "net_name": f"NET_{i + 1}"
+                })
+
+        connected, conn_skipped = _connect_components(board, footprint_by_ref, connections)
+
+        try:
+            board.BuildConnectivity()
+        except Exception:
+            pass
+
         pcbnew.Refresh()
         
         result = ""
@@ -142,6 +345,10 @@ def add_components_from_circuit_data(circuit_data: dict):
             result += f"✅ Added: {', '.join(added)}\n"
         if skipped:
             result += f"⚠️ Skipped: {', '.join(skipped)}\n"
+        if connected:
+            result += f"🔗 Connected nets/tracks: {connected}\n"
+        if conn_skipped:
+            result += f"⚠️ Unconnected links skipped: {conn_skipped}\n"
         if not added:
             result += "❌ No components added!\n"
         

@@ -94,7 +94,7 @@ def run_freerouting(dsn_path: str):
         ses_path = dsn_path.replace(".dsn", ".ses")
 
         cmd = [
-            "C:\\Program Files\\Java\\jdk-21\\bin\\java.exe", "-jar", FREEROUTING_JAR,
+            "C:\\Program Files\\Java\\jdk-21.0.10\\bin\\java.exe", "-jar", FREEROUTING_JAR,
             "-de", dsn_path,
             "-do", ses_path,
             "-mp", "100"

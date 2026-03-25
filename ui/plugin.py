@@ -159,7 +159,11 @@ class AiPluginDialog(wx.Dialog):
                 )
                 result = response.json()["result"]
                 self.update_status("✅ Schematic generated!", (0, 200, 100))
-                wx.MessageBox(result, "AI Schematic Result", wx.OK)
+                wx.MessageBox(
+                    result + "\n\nNote: This step generates circuit data only.\nUse 'Write Components to PCB' to place components and draw copper tracks.",
+                    "AI Schematic Result",
+                    wx.OK
+                )
             except Exception as e:
                 self.update_status("❌ Error!", (255, 50, 50))
                 wx.MessageBox(f"Error: {str(e)}\nMake sure FastAPI backend is running!",
