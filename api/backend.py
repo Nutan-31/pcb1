@@ -15,113 +15,21 @@ OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 class PromptRequest(BaseModel):
     prompt: str
 
-
-def _split_ref_pin(value: str):
-    """Parse values like R1:1 or D1-A into (ref, pin)."""
-    if not value:
-        return None, None
-    text = str(value).strip()
-    match = re.match(r'^([A-Za-z]+\d+)[\s:\-_/]*([A-Za-z0-9+\-]+)?$', text)
-    if not match:
-        return None, None
-    ref = match.group(1).upper()
-    pin = (match.group(2) or "").upper()
-    return ref, pin
-
-
-def _parse_connection_line(text: str):
-    """Parse connection text like 'R1 pin 1 to D1 pin 2'."""
-    if not text:
-        return None
-
-    pattern = (
-        r'([A-Za-z]+\d+)\s*(?:pin|pad)?\s*([A-Za-z0-9+\-]*)\s*'
-        r'(?:to|->|connect(?:ed)?\s*to)\s*'
-        r'([A-Za-z]+\d+)\s*(?:pin|pad)?\s*([A-Za-z0-9+\-]*)'
-    )
-    match = re.search(pattern, text, re.IGNORECASE)
-    if not match:
-        return None
-
-    return {
-        "from_ref": match.group(1).upper(),
-        "from_pin": (match.group(2) or "").upper(),
-        "to_ref": match.group(3).upper(),
-        "to_pin": (match.group(4) or "").upper(),
-    }
-
-
-def ensure_connections(circuit_data: dict) -> dict:
-    """Normalize connection objects and create a fallback chain if missing."""
-    if not circuit_data:
-        return circuit_data
-
-    components = circuit_data.get("components", [])
-    raw_connections = circuit_data.get("connections", []) or []
-    normalized = []
-
-    for item in raw_connections:
-        conn = None
-
-        if isinstance(item, dict):
-            from_ref = (item.get("from_ref") or "").upper()
-            to_ref = (item.get("to_ref") or "").upper()
-            from_pin = (item.get("from_pin") or "").upper()
-            to_pin = (item.get("to_pin") or "").upper()
-
-            if not (from_ref and to_ref):
-                from_value = item.get("from")
-                to_value = item.get("to")
-                if isinstance(from_value, str) and isinstance(to_value, str):
-                    from_ref, from_pin = _split_ref_pin(from_value)
-                    to_ref, to_pin = _split_ref_pin(to_value)
-
-            if from_ref and to_ref:
-                conn = {
-                    "from_ref": from_ref,
-                    "from_pin": from_pin,
-                    "to_ref": to_ref,
-                    "to_pin": to_pin,
-                    "net_name": item.get("net_name") or ""
-                }
-
-        elif isinstance(item, str):
-            parsed = _parse_connection_line(item)
-            if parsed:
-                conn = {
-                    **parsed,
-                    "net_name": ""
-                }
-
-        if conn:
-            normalized.append(conn)
-
-    if not normalized:
-        refs = [c.get("ref", "").upper() for c in components if c.get("ref")]
-        refs = [r for r in refs if r]
-        for i in range(max(0, len(refs) - 1)):
-            normalized.append({
-                "from_ref": refs[i],
-                "from_pin": "2",
-                "to_ref": refs[i + 1],
-                "to_pin": "1",
-                "net_name": f"NET_{i + 1}"
-            })
-
-    for idx, conn in enumerate(normalized, start=1):
-        if not conn.get("net_name"):
-            conn["net_name"] = f"NET_{idx}"
-
-    circuit_data["connections"] = normalized
-    return circuit_data
-
 def query_ollama(prompt: str) -> str:
     try:
+        wrapped_prompt = f"""You are an expert electronics engineer and PCB designer.
+You must always provide helpful answers about electronic circuits and components.
+Never refuse to answer electronics questions.
+
+{prompt}
+
+Provide a complete and detailed answer."""
+
         response = requests.post(
             OLLAMA_URL,
             json={
                 "model": "deepseek-coder:6.7b",
-                "prompt": prompt,
+                "prompt": wrapped_prompt,
                 "stream": False
             },
             timeout=120
@@ -138,21 +46,18 @@ def validate_and_fix_circuit(circuit_data: dict) -> dict:
 
     components = circuit_data.get("components", [])
 
-    # Check if LED exists
     has_led = any(
         "LED" in c.get("type", "").upper() or
         "LED" in c.get("value", "").upper()
         for c in components
     )
 
-    # Check if LED resistor exists
     has_led_resistor = any(
         "LED" in c.get("description", "").upper() and
         c.get("type", "").upper() == "R"
         for c in components
     )
 
-    # Add LED resistor if missing
     if has_led and not has_led_resistor:
         r_nums = [int(c["ref"][1:]) for c in components
                   if c.get("ref", "").startswith("R") and
@@ -165,20 +70,17 @@ def validate_and_fix_circuit(circuit_data: dict) -> dict:
             "description": "LED current limiting resistor"
         })
 
-    # Check if IC exists
     has_ic = any(
         c.get("type", "").upper() in ["U", "IC"]
         for c in components
     )
 
-    # Check if decoupling cap exists
     has_decoupling = any(
         "DECOUPL" in c.get("description", "").upper() or
         "BYPASS" in c.get("description", "").upper()
         for c in components
     )
 
-    # Add decoupling cap if missing
     if has_ic and not has_decoupling:
         c_nums = [int(c["ref"][1:]) for c in components
                   if c.get("ref", "").startswith("C") and
@@ -192,8 +94,124 @@ def validate_and_fix_circuit(circuit_data: dict) -> dict:
         })
 
     circuit_data["components"] = components
-    circuit_data = ensure_connections(circuit_data)
     return circuit_data
+
+def generate_fallback_circuit(prompt: str) -> dict:
+    """Generate circuit data based on keywords when AI fails"""
+    prompt_lower = prompt.lower()
+    components = []
+    circuit_name = prompt.title()
+    voltage = "5V"
+
+    comp_num = {"R": 1, "C": 1, "D": 1, "U": 1, "Q": 1, "SW": 1, "Y": 1, "BT": 1}
+
+    def add_comp(type_, value, desc):
+        ref = f"{type_}{comp_num[type_]}"
+        comp_num[type_] += 1
+        components.append({
+            "ref": ref,
+            "type": type_,
+            "value": value,
+            "description": desc
+        })
+
+    if "9v" in prompt_lower or "battery" in prompt_lower:
+        voltage = "9V"
+    elif "12v" in prompt_lower:
+        voltage = "12V"
+    elif "3.3v" in prompt_lower:
+        voltage = "3.3V"
+
+    if "555" in prompt_lower:
+        add_comp("U", "NE555", "555 Timer IC")
+        add_comp("R", "10K", "Timing resistor 1")
+        add_comp("R", "100K", "Timing resistor 2")
+        add_comp("C", "10uF", "Timing capacitor")
+        add_comp("C", "100nF", "Decoupling capacitor")
+    elif "arduino" in prompt_lower:
+        add_comp("U", "ATmega328P", "Arduino MCU")
+        add_comp("Y", "16MHz", "Crystal")
+        add_comp("C", "22pF", "Crystal capacitor 1")
+        add_comp("C", "22pF", "Crystal capacitor 2")
+        add_comp("C", "100nF", "Decoupling capacitor")
+        add_comp("R", "10K", "Reset pullup")
+    elif "esp32" in prompt_lower:
+        add_comp("U", "ESP32", "ESP32 module")
+        add_comp("C", "100uF", "Power capacitor")
+        add_comp("C", "100nF", "Decoupling capacitor")
+        add_comp("R", "10K", "Pullup resistor")
+    elif "regulator" in prompt_lower or "3.3v" in prompt_lower:
+        add_comp("U", "AMS1117-3.3", "LDO Regulator")
+        add_comp("C", "10uF", "Input capacitor")
+        add_comp("C", "10uF", "Output capacitor")
+        add_comp("C", "100nF", "Input decoupling")
+        add_comp("C", "100nF", "Output decoupling")
+    elif "mosfet" in prompt_lower:
+        add_comp("Q", "2N7000", "N-channel MOSFET")
+        add_comp("R", "10K", "Gate resistor")
+        add_comp("R", "100K", "Gate pulldown")
+        add_comp("D", "1N4007", "Flyback diode")
+    elif "amplifier" in prompt_lower or "op amp" in prompt_lower:
+        add_comp("U", "LM741", "Op-Amp IC")
+        add_comp("R", "10K", "Input resistor")
+        add_comp("R", "10K", "Feedback resistor")
+        add_comp("C", "100nF", "Decoupling 1")
+        add_comp("C", "100nF", "Decoupling 2")
+        voltage = "12V"
+    elif "temperature" in prompt_lower:
+        add_comp("U", "LM35", "Temperature sensor IC")
+        add_comp("R", "10K", "Pullup resistor")
+        add_comp("C", "100nF", "Decoupling capacitor")
+    elif "bluetooth" in prompt_lower:
+        add_comp("U", "HC-05", "Bluetooth module")
+        add_comp("R", "1K", "TX voltage divider 1")
+        add_comp("R", "2K", "TX voltage divider 2")
+        add_comp("C", "100nF", "Decoupling capacitor")
+    elif "motor" in prompt_lower:
+        add_comp("U", "L298N", "Motor driver IC")
+        add_comp("C", "100nF", "Decoupling capacitor")
+        add_comp("D", "1N4007", "Flyback diode 1")
+        add_comp("D", "1N4007", "Flyback diode 2")
+    elif "sensor" in prompt_lower:
+        add_comp("U", "LM358", "Op-Amp for sensor")
+        add_comp("R", "10K", "Sensor pullup")
+        add_comp("R", "10K", "Voltage divider")
+        add_comp("C", "100nF", "Decoupling capacitor")
+    elif "power" in prompt_lower or "supply" in prompt_lower:
+        add_comp("U", "LM7805", "5V Voltage regulator")
+        add_comp("C", "100uF", "Input capacitor")
+        add_comp("C", "100uF", "Output capacitor")
+        add_comp("C", "100nF", "Input decoupling")
+        add_comp("C", "100nF", "Output decoupling")
+        add_comp("D", "1N4007", "Rectifier diode")
+    elif "relay" in prompt_lower:
+        add_comp("Q", "BC547", "NPN transistor")
+        add_comp("R", "1K", "Base resistor")
+        add_comp("D", "1N4007", "Flyback diode")
+        add_comp("U", "RELAY", "5V Relay")
+    else:
+        add_comp("R", "10K", "Resistor")
+        add_comp("C", "100nF", "Capacitor")
+
+    if "led" in prompt_lower:
+        add_comp("D", "LED", "Status LED")
+        add_comp("R", "330R", "LED current limiting")
+
+    if "switch" in prompt_lower or "button" in prompt_lower:
+        add_comp("SW", "SW_PUSH", "Push button")
+        add_comp("R", "10K", "Button pullup")
+
+    if not components:
+        add_comp("R", "10K", "Resistor")
+        add_comp("C", "100nF", "Capacitor")
+
+    return {
+        "circuit_name": circuit_name,
+        "description": f"Circuit for {prompt}",
+        "components": components,
+        "connections": [],
+        "voltage": voltage
+    }
 
 @app.post("/generate_schematic")
 def generate_schematic(request: PromptRequest):
@@ -225,11 +243,7 @@ Return ONLY valid JSON with no explanation:
         {{"ref": "C1", "type": "C", "value": "CORRECT_VALUE", "description": "Purpose"}},
         {{"ref": "D1", "type": "LED", "value": "LED", "description": "Purpose"}}
     ],
-    "connections": [
-        {{"from_ref": "R1", "from_pin": "1", "to_ref": "D1", "to_pin": "1", "net_name": "LED_SIGNAL"}},
-        {{"from_ref": "R1", "from_pin": "2", "to_ref": "BT1", "to_pin": "1", "net_name": "VCC"}},
-        {{"from_ref": "D1", "from_pin": "2", "to_ref": "BT1", "to_pin": "2", "net_name": "GND"}}
-    ],
+    "connections": [],
     "voltage": "5V"
 }}
 
@@ -250,9 +264,11 @@ Return ONLY the JSON object. No markdown. No explanation."""
             except:
                 pass
 
+        # AI failed - use smart fallback
+        fallback_data = generate_fallback_circuit(request.prompt)
         return {
-            "result": ai_response,
-            "circuit_data": None,
+            "result": f"Circuit: {fallback_data.get('circuit_name')}\nComponents: {len(fallback_data.get('components', []))}",
+            "circuit_data": fallback_data,
             "ai_response": ai_response
         }
 
@@ -450,11 +466,7 @@ Return ONLY this JSON format with no explanation:
         {{"ref": "C1", "type": "C", "value": "100nF"}},
         {{"ref": "D1", "type": "LED", "value": "LED"}}
     ],
-    "connections": [
-        {{"from_ref": "R1", "from_pin": "1", "to_ref": "D1", "to_pin": "1", "net_name": "LED_SIGNAL"}},
-        {{"from_ref": "R1", "from_pin": "2", "to_ref": "BT1", "to_pin": "1", "net_name": "VCC"}},
-        {{"from_ref": "D1", "from_pin": "2", "to_ref": "BT1", "to_pin": "2", "net_name": "GND"}}
-    ],
+    "connections": [],
     "voltage": "5V"
 }}"""
 
@@ -470,7 +482,7 @@ Return ONLY this JSON format with no explanation:
                 pass
 
         if not circuit_data:
-            return {"result": "Could not parse circuit data!", "circuit_data": None}
+            circuit_data = generate_fallback_circuit(request.prompt)
 
         return {
             "result": f"Circuit data ready: {circuit_data.get('circuit_name')}",
